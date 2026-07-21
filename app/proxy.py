@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 
 from app.config import Settings
+from app.sanitize import sanitize_payload
 
 HOP_BY_HOP = {
     "connection",
@@ -64,6 +65,21 @@ def _wants_stream(request: Request, body: bytes) -> bool:
     return bool(isinstance(payload, dict) and payload.get("stream") is True)
 
 
+def _rewrite_body(body: bytes) -> bytes:
+    """Normalise tools Cursor → schéma attendu par gpt-5.6-* / Imọlẹ."""
+    if not body:
+        return body
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return body
+    if not isinstance(payload, dict):
+        return body
+    if "tools" not in payload and "tool_choice" not in payload:
+        return body
+    return json.dumps(sanitize_payload(payload), ensure_ascii=False).encode("utf-8")
+
+
 async def proxy_request(
     request: Request,
     settings: Settings,
@@ -71,8 +87,12 @@ async def proxy_request(
 ) -> Response:
     url = upstream_url(settings, path, request.url.query)
     headers = build_upstream_headers(request, settings)
-    body = await request.body()
+    body = _rewrite_body(await request.body())
     client: httpx.AsyncClient = request.app.state.http
+
+    # Content-Length recalculé par httpx ; retirer l'ancien si présent
+    headers.pop("Content-Length", None)
+    headers.pop("content-length", None)
 
     if _wants_stream(request, body):
         return await _stream_upstream(
