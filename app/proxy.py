@@ -75,7 +75,8 @@ def _rewrite_body(body: bytes) -> bytes:
         return body
     if not isinstance(payload, dict):
         return body
-    if "tools" not in payload and "tool_choice" not in payload:
+    # Toujours normaliser si tools / historique messages (IDs Cursor trop longs, etc.)
+    if not any(k in payload for k in ("tools", "tool_choice", "messages", "input")):
         return body
     return json.dumps(sanitize_payload(payload), ensure_ascii=False).encode("utf-8")
 

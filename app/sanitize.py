@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 from typing import Any
+
+# Imole / Azure OpenAI : tool_call.id max 64 chars (Cursor envoie souvent ~80+)
+MAX_TOOL_CALL_ID_LEN = 64
 
 
 def sanitize_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -19,7 +23,77 @@ def sanitize_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if "tool_choice" in out:
         out["tool_choice"] = _sanitize_tool_choice(out["tool_choice"])
 
+    id_map: dict[str, str] = {}
+    if isinstance(out.get("messages"), list):
+        out["messages"] = _sanitize_messages(out["messages"], id_map)
+    if isinstance(out.get("input"), list):
+        out["input"] = _sanitize_responses_input(out["input"], id_map)
+
     return out
+
+
+def _short_tool_call_id(original: str, id_map: dict[str, str]) -> str:
+    if original in id_map:
+        return id_map[original]
+    if len(original) <= MAX_TOOL_CALL_ID_LEN:
+        id_map[original] = original
+        return original
+    digest = hashlib.sha256(original.encode("utf-8")).hexdigest()[:40]
+    short = f"call_{digest}"  # 45 chars <= 64
+    id_map[original] = short
+    return short
+
+
+def _sanitize_messages(
+    messages: list[Any], id_map: dict[str, str]
+) -> list[Any]:
+    cleaned: list[Any] = []
+    for msg in messages:
+        if not isinstance(msg, dict):
+            cleaned.append(msg)
+            continue
+        m = dict(msg)
+
+        tool_calls = m.get("tool_calls")
+        if isinstance(tool_calls, list):
+            fixed_calls = []
+            for call in tool_calls:
+                if not isinstance(call, dict):
+                    continue
+                c = dict(call)
+                call_id = c.get("id")
+                if isinstance(call_id, str) and call_id:
+                    c["id"] = _short_tool_call_id(call_id, id_map)
+                fixed_calls.append(c)
+            m["tool_calls"] = fixed_calls
+
+        tool_call_id = m.get("tool_call_id")
+        if isinstance(tool_call_id, str) and tool_call_id:
+            m["tool_call_id"] = _short_tool_call_id(tool_call_id, id_map)
+
+        cleaned.append(m)
+    return cleaned
+
+
+def _sanitize_responses_input(
+    items: list[Any], id_map: dict[str, str]
+) -> list[Any]:
+    cleaned: list[Any] = []
+    for item in items:
+        if not isinstance(item, dict):
+            cleaned.append(item)
+            continue
+        it = dict(item)
+        for key in ("call_id", "id"):
+            val = it.get(key)
+            if isinstance(val, str) and len(val) > MAX_TOOL_CALL_ID_LEN:
+                # call_id Responses API a souvent une limite proche ; on aligne
+                if key == "call_id" or str(it.get("type", "")).endswith(
+                    "tool_call"
+                ):
+                    it[key] = _short_tool_call_id(val, id_map)
+        cleaned.append(it)
+    return cleaned
 
 
 def _sanitize_tools(tools: list[Any]) -> list[dict[str, Any]]:
