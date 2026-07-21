@@ -13,10 +13,16 @@ from app.proxy import openai_error, proxy_request
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
+    # read=None : ne coupe pas les streams silencieux (reasoning / tool pauses)
     app.state.http = httpx.AsyncClient(
-        timeout=httpx.Timeout(settings.request_timeout, connect=30.0),
+        timeout=httpx.Timeout(
+            connect=30.0,
+            read=None,
+            write=settings.request_timeout,
+            pool=30.0,
+        ),
         follow_redirects=True,
-        limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
+        limits=httpx.Limits(max_connections=100, max_keepalive_connections=40),
     )
     yield
     await app.state.http.aclose()

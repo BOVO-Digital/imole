@@ -16,7 +16,8 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8080
     log_level: str = "info"
-    request_timeout: float = 600.0
+    # Agents Cursor / reasoning : longues pauses entre chunks SSE
+    request_timeout: float = 1800.0
 
 
 @lru_cache

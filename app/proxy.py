@@ -6,7 +6,6 @@ from urllib.parse import urljoin
 import httpx
 from fastapi import Request, Response
 from fastapi.responses import StreamingResponse
-from starlette.background import BackgroundTask
 
 from app.config import Settings
 from app.sanitize import sanitize_payload
@@ -100,12 +99,18 @@ async def proxy_request(
             client, request.method, url, headers, body, settings
         )
 
+    timeout = httpx.Timeout(
+        connect=30.0,
+        read=settings.request_timeout,
+        write=settings.request_timeout,
+        pool=30.0,
+    )
     upstream = await client.request(
         method=request.method,
         url=url,
         headers=headers,
         content=body if body else None,
-        timeout=settings.request_timeout,
+        timeout=timeout,
     )
     return _to_response(upstream)
 
@@ -118,12 +123,19 @@ async def _stream_upstream(
     body: bytes,
     settings: Settings,
 ) -> StreamingResponse:
+    # read=None : Cursor agent peut rester silencieux longtemps entre chunks
+    timeout = httpx.Timeout(
+        connect=30.0,
+        read=None,
+        write=settings.request_timeout,
+        pool=30.0,
+    )
     req = client.build_request(
         method=method,
         url=url,
         headers=headers,
         content=body if body else None,
-        timeout=settings.request_timeout,
+        timeout=timeout,
     )
     upstream = await client.send(req, stream=True)
 
@@ -135,12 +147,17 @@ async def _stream_upstream(
         finally:
             await upstream.aclose()
 
+    response_headers = _filtered_headers(upstream)
+    # Empêche buffering reverse-proxy / CDN sur le SSE
+    response_headers["Cache-Control"] = "no-cache, no-transform"
+    response_headers["X-Accel-Buffering"] = "no"
+    response_headers["Connection"] = "keep-alive"
+
     return StreamingResponse(
         iterator(),
         status_code=upstream.status_code,
-        headers=_filtered_headers(upstream),
-        background=BackgroundTask(upstream.aclose),
-        media_type=upstream.headers.get("content-type"),
+        headers=response_headers,
+        media_type=upstream.headers.get("content-type") or "text/event-stream",
     )
 
 
