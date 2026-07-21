@@ -1,0 +1,11 @@
+.env
+.git
+.venv
+venv
+__pycache__
+*.pyc
+cloudflare/credentials/*
+!cloudflare/credentials/.gitkeep
+cloudflare/config.yml
+README.md
+scripts

@@ -1,0 +1,137 @@
+# Build → GHCR → deploy VPS (Traefik / n8n_default)
+# URL : https://imole.bovo-digital.tech/v1
+
+name: Deploy Production (VPS)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-imole-prod
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/bovo-digital/imole
+  COMPOSE_DIR: /opt/imole
+
+jobs:
+  docker:
+    name: Build & push to GHCR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=sha,format=short
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy on VPS
+    needs: docker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify secrets
+        run: |
+          if [ -z "${{ secrets.VPS_HOST }}" ] || [ -z "${{ secrets.VPS_USER }}" ] || [ -z "${{ secrets.VPS_SSH_KEY }}" ]; then
+            echo "::error::Secrets VPS manquants (VPS_HOST, VPS_USER, VPS_SSH_KEY)"
+            exit 1
+          fi
+          if [ -z "${{ secrets.IMOLE_API_KEY }}" ] || [ -z "${{ secrets.GATEWAY_API_KEY }}" ]; then
+            echo "::error::Secrets IMOLE_API_KEY / GATEWAY_API_KEY manquants"
+            exit 1
+          fi
+          echo "Secrets OK"
+
+      - uses: actions/checkout@v4
+
+      - name: Copy compose to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          source: docker-compose.vps.yml
+          target: ${{ env.COMPOSE_DIR }}/
+
+      - name: Deploy on VPS
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          IMOLE_API_KEY: ${{ secrets.IMOLE_API_KEY }}
+          GATEWAY_API_KEY: ${{ secrets.GATEWAY_API_KEY }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.repository_owner }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          timeout: 120s
+          command_timeout: 10m
+          envs: IMOLE_API_KEY,GATEWAY_API_KEY,GHCR_TOKEN,GHCR_USER
+          script: |
+            set -euo pipefail
+            echo "[$(date -Iseconds)] Deploy imole-gateway..."
+            mkdir -p /opt/imole
+            cd /opt/imole
+
+            umask 077
+            cat > .env <<EOF
+            IMOLE_BASE_URL=https://api.imole.app/v1
+            IMOLE_API_KEY=${IMOLE_API_KEY}
+            GATEWAY_API_KEY=${GATEWAY_API_KEY}
+            EOF
+            # retirer indentation éventuelle
+            sed -i 's/^[[:space:]]*//' .env
+            chmod 600 .env
+
+            echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
+
+            docker compose -f docker-compose.vps.yml pull
+            docker compose -f docker-compose.vps.yml up -d --remove-orphans
+            docker image prune -af --filter "until=72h" 2>/dev/null || true
+            docker compose -f docker-compose.vps.yml ps
+
+      - name: Health check
+        run: |
+          sleep 15
+          for i in $(seq 1 18); do
+            code=$(curl -s -o /tmp/imole-health.json -w "%{http_code}" https://imole.bovo-digital.tech/health || true)
+            if [ "$code" = "200" ]; then
+              echo "OK https://imole.bovo-digital.tech/health"
+              cat /tmp/imole-health.json
+              exit 0
+            fi
+            echo "Tentative $i — HTTP ${code:-000}"
+            sleep 5
+          done
+          echo "Echec health check"
+          exit 1

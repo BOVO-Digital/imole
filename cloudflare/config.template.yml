@@ -1,0 +1,18 @@
+# Copier vers config.yml après création du tunnel :
+#   cp cloudflare/config.template.yml cloudflare/config.yml
+#
+# Remplacer TUNNEL_ID et CF_HOSTNAME.
+# Le hostname DNS est géré par Cloudflare — il reste identique aux redémarrages.
+
+tunnel: TUNNEL_ID
+credentials-file: /etc/cloudflared/credentials/TUNNEL_ID.json
+
+ingress:
+  # Hostname FIXE — ne change jamais tant que cette entrée reste
+  - hostname: CF_HOSTNAME
+    service: http://api:8080
+    originRequest:
+      noTLSVerify: false
+      connectTimeout: 30s
+  # Catch-all obligatoire
+  - service: http_status:404

@@ -1,0 +1,52 @@
+# Déploiement VPS (Hostinger) — HTTPS via Caddy + Let's Encrypt
+# Usage: docker compose -f docker-compose.prod.yml up -d --build
+
+services:
+  api:
+    build: .
+    container_name: imole-gateway
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8080
+    # Pas d'exposition publique : seul Caddy y accède
+    expose:
+      - "8080"
+    networks:
+      - imole
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  caddy:
+    image: caddy:2.10-alpine
+    container_name: imole-caddy
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - imole
+
+networks:
+  imole:
+    name: imole-net
+
+volumes:
+  caddy_data:
+  caddy_config:

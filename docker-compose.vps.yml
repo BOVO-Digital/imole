@@ -1,0 +1,35 @@
+# ── Imole OpenAI Gateway — docker-compose pour le VPS ───────
+# Usage sur le VPS : docker compose -f docker-compose.vps.yml up -d
+# Traefik déjà en place → on se branche sur n8n_default
+#
+# Fichier /opt/imole/.env (OBLIGATOIRE) :
+#   IMOLE_API_KEY=imole_live_...
+#   GATEWAY_API_KEY=sk-...
+#   IMOLE_BASE_URL=https://api.imole.app/v1   (optionnel)
+#
+# URL publique : https://imole.bovo-digital.tech/v1
+
+services:
+  imole-gateway:
+    image: ghcr.io/bovo-digital/imole:latest
+    container_name: imole-gateway
+    restart: unless-stopped
+    networks:
+      - n8n_default
+    env_file:
+      - .env
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8080
+      - IMOLE_BASE_URL=${IMOLE_BASE_URL:-https://api.imole.app/v1}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.imole.entrypoints=web,websecure"
+      - "traefik.http.routers.imole.rule=Host(`imole.bovo-digital.tech`)"
+      - "traefik.http.routers.imole.tls=true"
+      - "traefik.http.routers.imole.tls.certresolver=mytlschallenge"
+      - "traefik.http.services.imole.loadbalancer.server.port=8080"
+
+networks:
+  n8n_default:
+    external: true

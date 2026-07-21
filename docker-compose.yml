@@ -1,0 +1,59 @@
+services:
+  api:
+    build: .
+    container_name: imole-gateway
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8080
+    ports:
+      - "${PORT:-8080}:8080"
+    networks:
+      - imole
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Tunnel nommé Cloudflare — hostname FIXE via CF_HOSTNAME / config.yml
+  # Ne jamais utiliser `cloudflared tunnel --url` (URL aléatoire à chaque restart).
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: imole-cloudflared
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    env_file:
+      - .env
+    # Mode recommandé : token de tunnel nommé (Zero Trust → Networks → Tunnels)
+    command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN}
+    networks:
+      - imole
+    profiles:
+      - tunnel
+
+  # Alternative : credentials fichier + config.yml persistante
+  cloudflared-file:
+    image: cloudflare/cloudflared:latest
+    container_name: imole-cloudflared-file
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    volumes:
+      - ./cloudflare/config.yml:/etc/cloudflared/config.yml:ro
+      - ./cloudflare/credentials:/etc/cloudflared/credentials:ro
+    command: tunnel --config /etc/cloudflared/config.yml --no-autoupdate run
+    networks:
+      - imole
+    profiles:
+      - tunnel-file
+
+networks:
+  imole:
+    name: imole-net
