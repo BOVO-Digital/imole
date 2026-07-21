@@ -76,8 +76,9 @@ def _sanitize_one_tool(tool: dict[str, Any]) -> dict[str, Any] | None:
             body: dict[str, Any] = {"name": custom["name"]}
             if custom.get("description"):
                 body["description"] = custom["description"]
-            if isinstance(custom.get("format"), dict):
-                body["format"] = custom["format"]
+            format_value = _sanitize_custom_format(custom.get("format"))
+            if format_value is not None:
+                body["format"] = format_value
             return {"type": "custom", "custom": body}
 
         # Format plat Responses/Cursor: {type:custom, name, description, format}
@@ -85,8 +86,9 @@ def _sanitize_one_tool(tool: dict[str, Any]) -> dict[str, Any] | None:
             body = {"name": tool["name"]}
             if tool.get("description"):
                 body["description"] = tool["description"]
-            if isinstance(tool.get("format"), dict):
-                body["format"] = tool["format"]
+            format_value = _sanitize_custom_format(tool.get("format"))
+            if format_value is not None:
+                body["format"] = format_value
             return {"type": "custom", "custom": body}
 
         # type=custom sans name → drop (évite model_validation_failed)
@@ -115,6 +117,39 @@ def _sanitize_one_tool(tool: dict[str, Any]) -> dict[str, Any] | None:
         }
 
     # Types internes non supportés (collaboration, tool_search, etc.) → drop
+    return None
+
+
+def _sanitize_custom_format(format_value: Any) -> dict[str, Any] | None:
+    """Convertit le format Cursor plat vers le format OpenAI/Imole."""
+    if not isinstance(format_value, dict):
+        return None
+
+    format_type = str(format_value.get("type") or "").lower()
+    if format_type == "text":
+        return {"type": "text"}
+
+    if format_type == "grammar":
+        grammar = format_value.get("grammar")
+        if isinstance(grammar, dict):
+            syntax = grammar.get("syntax")
+            definition = grammar.get("definition")
+        else:
+            syntax = format_value.get("syntax")
+            definition = format_value.get("definition")
+
+        if syntax in {"lark", "regex"} and isinstance(definition, str):
+            return {
+                "type": "grammar",
+                "grammar": {
+                    "syntax": syntax,
+                    "definition": definition,
+                },
+            }
+
+        # Un format grammar incomplet ne doit pas faire échouer toute la requête.
+        return {"type": "text"}
+
     return None
 
 
