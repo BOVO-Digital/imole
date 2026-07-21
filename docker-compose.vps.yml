@@ -30,12 +30,8 @@ services:
       - "traefik.http.routers.imole.tls=true"
       - "traefik.http.routers.imole.tls.certresolver=mytlschallenge"
       - "traefik.http.services.imole.loadbalancer.server.port=8080"
-      # Streaming Cursor / agents longs : flush immédiat + timeouts élevés
+      # Flush immédiat pour SSE Cursor (évite buffering)
       - "traefik.http.services.imole.loadbalancer.responseforwarding.flushinterval=1ms"
-      - "traefik.http.services.imole.loadbalancer.serversTransport=imole"
-      - "traefik.http.serversTransports.imole.forwardingTimeouts.dialTimeout=30s"
-      - "traefik.http.serversTransports.imole.forwardingTimeouts.responseHeaderTimeout=0s"
-      - "traefik.http.serversTransports.imole.forwardingTimeouts.idleConnTimeout=3600s"
 
 networks:
   n8n_default:
