@@ -21,6 +21,9 @@ HOP_BY_HOP = {
     "upgrade",
     "host",
     "content-length",
+    # httpx décompresse le body → ne jamais retransmettre ces headers tels quels
+    "content-encoding",
+    "content-length",
 }
 
 
@@ -105,35 +108,34 @@ async def _stream_upstream(
 
     async def iterator() -> AsyncIterator[bytes]:
         try:
-            async for chunk in upstream.aiter_raw():
+            # aiter_bytes = body décompressé (aligné avec strip content-encoding)
+            async for chunk in upstream.aiter_bytes():
                 yield chunk
         finally:
             await upstream.aclose()
 
-    response_headers = {
-        k: v
-        for k, v in upstream.headers.items()
-        if k.lower() not in HOP_BY_HOP
-    }
     return StreamingResponse(
         iterator(),
         status_code=upstream.status_code,
-        headers=response_headers,
+        headers=_filtered_headers(upstream),
         background=BackgroundTask(upstream.aclose),
         media_type=upstream.headers.get("content-type"),
     )
 
 
-def _to_response(upstream: httpx.Response) -> Response:
-    headers = {
+def _filtered_headers(upstream: httpx.Response) -> dict[str, str]:
+    return {
         k: v
         for k, v in upstream.headers.items()
         if k.lower() not in HOP_BY_HOP
     }
+
+
+def _to_response(upstream: httpx.Response) -> Response:
     return Response(
         content=upstream.content,
         status_code=upstream.status_code,
-        headers=headers,
+        headers=_filtered_headers(upstream),
         media_type=upstream.headers.get("content-type"),
     )
 
