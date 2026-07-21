@@ -79,6 +79,7 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
+          timeout: 120s
           source: docker-compose.vps.yml
           target: ${{ env.COMPOSE_DIR }}/
 
@@ -94,8 +95,8 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
-          timeout: 120s
-          command_timeout: 10m
+          timeout: 180s
+          command_timeout: 15m
           envs: IMOLE_API_KEY,GATEWAY_API_KEY,GHCR_TOKEN,GHCR_USER
           script: |
             set -euo pipefail
@@ -108,6 +109,7 @@ jobs:
             IMOLE_BASE_URL=https://api.imole.app/v1
             IMOLE_API_KEY=${IMOLE_API_KEY}
             GATEWAY_API_KEY=${GATEWAY_API_KEY}
+            REQUEST_TIMEOUT=1800
             EOF
             # retirer indentation éventuelle
             sed -i 's/^[[:space:]]*//' .env
@@ -116,7 +118,7 @@ jobs:
             echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
 
             docker compose -f docker-compose.vps.yml pull
-            docker compose -f docker-compose.vps.yml up -d --remove-orphans
+            docker compose -f docker-compose.vps.yml up -d --remove-orphans --force-recreate
             docker image prune -af --filter "until=72h" 2>/dev/null || true
             docker compose -f docker-compose.vps.yml ps
 
