@@ -1,0 +1,33 @@
+name: Test Video API
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe video endpoints from runner
+        env:
+          GATEWAY_API_KEY: ${{ secrets.GATEWAY_API_KEY }}
+        run: |
+          set +e
+          echo "== Health =="
+          curl -fsS -m 20 https://imole.bovo-digital.tech/health; echo
+
+          for path in videos video/generations; do
+            echo "== POST /v1/$path =="
+            code=$(curl -sS -m 120 -X POST \
+              -H "Authorization: Bearer ${GATEWAY_API_KEY}" \
+              -H "Content-Type: application/json" \
+              https://imole.bovo-digital.tech/v1/${path} \
+              -d '{"model":"imole-video","prompt":"A cinematic shot of a sunset over the ocean","duration":5}' \
+              -o /tmp/resp.json -w "%{http_code}")
+            echo "HTTP ${code}"
+            head -c 2000 /tmp/resp.json; echo
+            echo "== GET /v1/$path == (list)"
+            curl -sS -m 20 -H "Authorization: Bearer ${GATEWAY_API_KEY}" \
+              https://imole.bovo-digital.tech/v1/${path} \
+              -o /tmp/list.json -w "HTTP %{http_code}\n"
+            head -c 2000 /tmp/list.json; echo
+          done
