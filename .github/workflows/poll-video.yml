@@ -1,0 +1,29 @@
+name: Poll Video Job
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        required: true
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GATEWAY_API_KEY: ${{ secrets.GATEWAY_API_KEY }}
+          JOB_ID: ${{ inputs.job_id }}
+        run: |
+          for i in $(seq 1 40); do
+            code=$(curl -sS -m 30 -H "Authorization: Bearer ${GATEWAY_API_KEY}" \
+              https://imole.bovo-digital.tech/v1/videos/${JOB_ID} \
+              -o /tmp/st.json -w "%{http_code}")
+            echo "[$i] HTTP $code"
+            head -c 3000 /tmp/st.json; echo
+            status=$(python3 -c 'import json;d=json.load(open("/tmp/st.json"));print(d.get("status",""))' 2>/dev/null)
+            if [ "$status" = "completed" ] || [ "$status" = "succeeded" ] || [ "$status" = "done" ]; then
+              echo "DONE"; break
+            fi
+            if [ "$status" = "failed" ] || [ "$status" = "error" ]; then
+              echo "FAILED"; break
+            fi
+            sleep 15
+          done
